@@ -148,6 +148,7 @@ async def bar_daily(date: Optional[str] = None, user: dict = Depends(get_current
         return {"date": d, "submitted": False}
     e = clean(e)
     e["submitted"] = True
+    e["tips_owed"] = round(abs(e.get("cash_sales", 0)), 2) if e.get("cash_sales", 0) < 0 else 0
     return e
 
 
@@ -182,6 +183,7 @@ async def bar_monthly(month: Optional[str] = None, user: dict = Depends(get_curr
     weeks = {}
     cash_total = card_total = total_total = 0
     over_short_total = 0
+    tips_owed = 0
     missing = []
     while d < end_d:
         ds = d.isoformat()
@@ -192,13 +194,15 @@ async def bar_monthly(month: Optional[str] = None, user: dict = Depends(get_curr
             card_total += e.get("card_sales", 0)
             total_total += e.get("total_sales", 0)
             over_short_total += e.get("over_short", 0)
+            if e.get("cash_sales", 0) < 0:
+                tips_owed += abs(e.get("cash_sales", 0))
             weeks[wk] = round(weeks.get(wk, 0) + e.get("total_sales", 0), 2)
         elif d.isoformat() <= today_str():
             missing.append(ds)
         d += timedelta(days=1)
     return {"month": month, "weeks": weeks, "cash_total": round(cash_total, 2),
             "card_total": round(card_total, 2), "total_total": round(total_total, 2),
-            "over_short_total": round(over_short_total, 2), "missing_days": missing}
+            "over_short_total": round(over_short_total, 2), "tips_owed": round(tips_owed, 2), "missing_days": missing}
 
 
 # ---------------- REPORT EDITS (admin, mandatory reason) ----------------
