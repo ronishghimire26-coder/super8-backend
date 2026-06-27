@@ -16,13 +16,13 @@ import ai_assistant as ai_module
 
 app = FastAPI(title="Super 8 by Wyndham — Unified System")
 
-app.include_router(auth_module.router)
-app.include_router(hotel_module.router)
-app.include_router(bar_module.router)
-app.include_router(admin_module.router)
-app.include_router(reports_module.router)
-app.include_router(dashboard_module.router)
-app.include_router(ai_module.router)
+app.include_router(auth_module.router, prefix="/api")
+app.include_router(hotel_module.router, prefix="/api")
+app.include_router(bar_module.router, prefix="/api")
+app.include_router(admin_module.router, prefix="/api")
+app.include_router(reports_module.router, prefix="/api")
+app.include_router(dashboard_module.router, prefix="/api")
+app.include_router(ai_module.router, prefix="/api")
 
 
 @app.get("/api/")
