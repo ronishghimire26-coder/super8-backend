@@ -1,73 +1,55 @@
-from fastapi import FastAPI, APIRouter
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
-import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
+import jwt
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from starlette.middleware.cors import CORSMiddleware
+from core import (
+    db, client, manager, logger, hash_password, verify_password, new_id, now_iso,
+    get_settings, JWT_SECRET, JWT_ALGORITHM,
+)
+import auth as auth_module
+import hotel as hotel_module
+import bar as bar_module
+import admin as admin_module
+import reports as reports_module
+import dashboard as dashboard_module
+import ai_assistant as ai_module
+
+app = FastAPI(title="Super 8 by Wyndham — Unified System")
+
+app.include_router(auth_module.router)
+app.include_router(hotel_module.router)
+app.include_router(bar_module.router)
+app.include_router(admin_module.router)
+app.include_router(reports_module.router)
+app.include_router(dashboard_module.router)
+app.include_router(ai_module.router)
 
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
-
-
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class StatusCheckCreate(BaseModel):
-    client_name: str
-
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
+@app.get("/api/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "Super 8 by Wyndham — Unified System API"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+@app.websocket("/api/ws")
+async def websocket_endpoint(ws: WebSocket, token: str = Query(None)):
+    # validate token (any authenticated role may subscribe)
+    if not token:
+        await ws.close(code=4001)
+        return
+    try:
+        jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except Exception:
+        await ws.close(code=4001)
+        return
+    await manager.connect(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(ws)
+    except Exception:
+        manager.disconnect(ws)
 
-# Include the router in the main app
-app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -77,13 +59,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup():
+    await db.users.create_index("email", unique=True)
+    await db.rooms.create_index("number")
+    await db.reservations.create_index("status")
+    await db.payments.create_index("date")
+    await db.bar_entries.create_index("date", unique=True)
+    await get_settings()
+    # seed admin
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@super8.com")
+    admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+    existing = await db.users.find_one({"email": admin_email})
+    if not existing:
+        await db.users.insert_one({"id": new_id(), "name": "Administrator", "email": admin_email,
+                                   "password_hash": hash_password(admin_password), "role": "admin",
+                                   "active": True, "created_at": now_iso()})
+        logger.info("Seeded admin user")
+    elif not verify_password(admin_password, existing["password_hash"]):
+        await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
+    # seed owner demo account
+    owner_email = "owner@super8.com"
+    if not await db.users.find_one({"email": owner_email}):
+        await db.users.insert_one({"id": new_id(), "name": "Owner", "email": owner_email,
+                                   "password_hash": hash_password("owner123"), "role": "owner",
+                                   "active": True, "created_at": now_iso()})
+
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
+async def shutdown():
     client.close()

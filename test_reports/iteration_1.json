@@ -1,0 +1,51 @@
+{
+  "summary": "Comprehensive backend testing (33 pytest cases) + targeted frontend smoke tests across Main Web, Owner PWA and Bar PWA. Backend 33/33 PASS after one test-assertion fix. Frontend critical flows (admin login -> dashboard with separated hotel/bar panels, sidebar nav, New Reservation dialog, Admin PIN gate unlock, Owner read-only PWA with 0 edit controls) all work. Bar PWA login + shell works but inventory rows did not render in one trial after a fresh login (likely localStorage draft / load-state issue) -- prefill API returns 4 items correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/hotel/reservations (extend)", "issue": "When extending, MongoDB update mixes $set and $inc on overlapping field paths is fine here (different fields). No bug, just noting that nights field tracked via $inc and check_out via $set works correctly in test."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BarApp (PWA)", "issue": "Inventory section showed 'No active items configured.' on first load after fresh login; backend /api/bar/entries/prefill returned 4 items at the same moment. Likely a load-race or stale localStorage 'bardraft' (single key shared across dates) overriding fresh prefill.", "selector": "[data-testid^=\\\"bar-app-item-\\\"]", "priority": "MEDIUM"},
+      {"component": "ReservationDialog", "issue": "Uses browser-native date inputs (mm/dd/yyyy) instead of shadcn Calendar/DatePicker component. Spec/playbook calls for shadcn calendar.", "selector": "input[type=date]", "priority": "LOW"},
+      {"component": "BarApp PWA login", "issue": "Login testids are bar-login-email/password/submit but review request documented them as bar-app-email/password/submit. Mismatch with spec docs (functional but breaks documented test contract).", "selector": "[data-testid=\\\"bar-login-email\\\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Bar PWA nightly entry load", "issue": "Items not populating from prefill on initial render in one test run; backend confirmed returning items.", "affected_selectors": ["[data-testid^=\\\"bar-app-item-\\\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Dashboard / Reservation Dialog", "issues": ["Multiple Radix Dialog warnings: 'Missing Description or aria-describedby for DialogContent'. Add DialogDescription or aria-describedby to silence and improve a11y."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_super8_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Investigate BarApp initial load: ensure prefill items render after login on first navigation (consider per-date draftKey instead of single 'bardraft' key, and don't preserve empty drafts).",
+    "Reconcile bar PWA login testids (bar-login-* vs spec's bar-app-*).",
+    "Replace native date inputs in ReservationDialog with shadcn Calendar/DatePicker as per playbook.",
+    "Add DialogDescription/aria-describedby to all shadcn Dialog usages."
+  ],
+  "critical_code_review_comments": [
+    "Owner role read-only enforcement is correctly implemented in require_write (returns 403 for owner across hotel/bar/payouts/log endpoints).",
+    "Negative bar cash_sales accepted and flowed through reconciliation; over_short computed correctly (verified: -45.50 cash sales -> expected_cash 144.5, over_short -4.5).",
+    "Tax computed at 9% verified at hotel reservation create + extend.",
+    "Bar entry submission upserts on date (unique index on bar_entries.date); good.",
+    "useBarEntry uses single draftKey='bardraft' shared across dates - drafts from one date can overwrite another. Recommend `bardraft:${date}`.",
+    "JWT scope='read' on owner is duplicate of role check; defence-in-depth ok but currently only role is enforced.",
+    "WebSocket /api/ws sometimes closes before connection per browser warnings - investigate ingress timing or initial connect race."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_super8_backend.py"
+  ],
+  "success_rate": {"backend": "100% (33/33)", "frontend": "~85% (5/6 critical flows verified)"},
+  "test_credentials": "admin@super8.com / admin123 (PIN 1234); owner@super8.com / owner123 - both confirmed working",
+  "seed_data_creation": "Test created TEST_ prefixed rooms (TESTAxxxx, CONVxxxx), reservations (TEST_Guest1, TEST_Future), bar item (TEST_Item_xxxx), and bar entries for 2026-06-28 and 2026-01-01. Not auto-cleaned; can be removed manually if desired.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite at /app/backend/tests/test_super8_backend.py covers auth, owner read-only enforcement, hotel CRUD + availability blocking + early checkout refund + extend, bar items + entries (incl. negative cash + below_par + late_entry), admin PIN gate + users CRUD + audit logs + log edit PIN gate, AI history + SSE chat, reports + dashboard structure. Run with: pytest /app/backend/tests/test_super8_backend.py -v. Backend dashboard is structured as hotel.{revenue.{cash,card,interac,total}, total_rooms, occupied, vacant, occupancy_pct, checkins_today, checkouts_today, ghost_rooms} and bar.{revenue.{cash,card,total}, entry_today, last_entry_date, last_over_short, below_par_count}. Hotel vs bar revenue kept separate. Frontend Bar PWA needs revisit for items not rendering on initial load.",
+  "rca of the issue": "Bar PWA 'No active items configured': hook useBarEntry uses draftKey='bardraft' (single key) so a stale empty draft from any prior date can replace fresh prefill rows. Reproduce: open /bar-app twice on different dates without clearing localStorage. Mitigation: scope draftKey per-date e.g. `bardraft:${date}` and skip applying draft if its rows array is empty while prefill returned items."
+}
