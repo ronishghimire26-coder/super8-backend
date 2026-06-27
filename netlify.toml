@@ -1,13 +1,14 @@
 [build]
   base = "frontend"
   command = "npm install --legacy-peer-deps && npm run build"
-  publish = "frontend/build"
+  publish = "build"
 
 [build.environment]
   CI = "false"
   DISABLE_ESLINT_PLUGIN = "true"
   SKIP_PREFLIGHT_CHECK = "true"
   GENERATE_SOURCEMAP = "false"
+  ESLINT_NO_DEV_ERRORS = "true"
 
 [[redirects]]
   from = "/*"
