@@ -20,11 +20,16 @@ const Row = ({ label, value, accent }) => (
 function HotelReport({ period, date, month }) {
   const [data, setData] = useState(null);
   useEffect(() => {
+    setData(null);
     const url = `/reports/hotel/${period}`;
     const params = period === "monthly" ? { month } : { date };
     api.get(url, { params }).then((r) => setData(r.data)).catch(() => setData(null));
   }, [period, date, month]);
-  if (!data) return null;
+  if (!data) return <div className="py-10 text-center text-sm text-slate-400">Loading report…</div>;
+  // guard against stale data shape during period switch
+  if (period === "daily" && !("items" in data)) return null;
+  if (period === "weekly" && !("daily" in data)) return null;
+  if (period === "monthly" && !("weeks" in data)) return null;
 
   if (period === "daily") {
     const i = data.items;
@@ -106,10 +111,15 @@ function HotelReport({ period, date, month }) {
 function BarReport({ period, date, month }) {
   const [data, setData] = useState(null);
   useEffect(() => {
+    setData(null);
     const params = period === "monthly" ? { month } : { date };
     api.get(`/reports/bar/${period}`, { params }).then((r) => setData(r.data)).catch(() => setData(null));
   }, [period, date, month]);
-  if (!data) return null;
+  if (!data) return <div className="py-10 text-center text-sm text-slate-400">Loading report…</div>;
+  // guard against stale data shape during period switch
+  if (period === "daily" && !("submitted" in data)) return null;
+  if (period === "weekly" && !("daily" in data)) return null;
+  if (period === "monthly" && !("weeks" in data)) return null;
 
   if (period === "daily") {
     if (!data.submitted) return <Card className="p-8 text-center text-slate-400" data-testid="bar-no-entry">No entry was submitted for {fmtDate(data.date)}. A late entry can be added from the Bar module.</Card>;
@@ -197,6 +207,7 @@ function SideBySide({ period, date, month }) {
   const [hotel, setHotel] = useState(null);
   const [bar, setBar] = useState(null);
   useEffect(() => {
+    setHotel(null); setBar(null);
     const params = period === "monthly" ? { month } : { date };
     api.get(`/reports/hotel/${period}`, { params }).then((r) => setHotel(r.data));
     api.get(`/reports/bar/${period}`, { params }).then((r) => setBar(r.data));
