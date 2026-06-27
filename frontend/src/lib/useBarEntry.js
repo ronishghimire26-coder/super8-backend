@@ -10,11 +10,13 @@ export function useBarEntry(date, persistKey) {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [existing, setExisting] = useState(null);
+  const [ready, setReady] = useState(false);
   const draftKey = persistKey ? `${persistKey}:${date}` : null;
 
   // load prefill + existing entry, or restore offline draft
   useEffect(() => {
     let cancelled = false;
+    setReady(false);
     async function load() {
       setLoading(true);
       try {
@@ -26,7 +28,8 @@ export function useBarEntry(date, persistKey) {
         const entry = ent.data;
         setExisting(entry);
         const draft = draftKey ? JSON.parse(localStorage.getItem(draftKey) || "null") : null;
-        if (draft && !entry) {
+        const draftHasData = draft && Array.isArray(draft.rows) && draft.rows.length > 0;
+        if (draftHasData && !entry) {
           setRows(draft.rows); setSales(draft.sales); setRecon(draft.recon);
           setPaidOuts(draft.paidOuts || []); setNotes(draft.notes || "");
         } else if (entry) {
@@ -51,9 +54,11 @@ export function useBarEntry(date, persistKey) {
       } catch (e) {
         // offline: restore draft if available
         const draft = draftKey ? JSON.parse(localStorage.getItem(draftKey) || "null") : null;
-        if (draft) { setRows(draft.rows); setSales(draft.sales); setRecon(draft.recon); setPaidOuts(draft.paidOuts || []); setNotes(draft.notes || ""); }
+        if (draft && Array.isArray(draft.rows) && draft.rows.length > 0) {
+          setRows(draft.rows); setSales(draft.sales); setRecon(draft.recon); setPaidOuts(draft.paidOuts || []); setNotes(draft.notes || "");
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); setReady(true); }
       }
     }
     load();
@@ -79,16 +84,16 @@ export function useBarEntry(date, persistKey) {
     return { enriched, paidTotal, expected, overShort, belowParCount: enriched.filter((e) => e.below_par).length };
   }, [rows, paidOuts, recon, sales]);
 
-  // autosave draft every change + 30s heartbeat
+  // autosave draft every change + 30s heartbeat (only after initial load)
   useEffect(() => {
-    if (!draftKey) return;
+    if (!draftKey || !ready) return;
     const payload = { rows, sales, recon, paidOuts, notes };
     localStorage.setItem(draftKey, JSON.stringify(payload));
-  }, [rows, sales, recon, paidOuts, notes, draftKey]);
+  }, [rows, sales, recon, paidOuts, notes, draftKey, ready]);
 
   const lastSaveRef = useRef(Date.now());
   useEffect(() => {
-    if (!draftKey) return;
+    if (!draftKey || !ready) return;
     const t = setInterval(() => {
       localStorage.setItem(draftKey, JSON.stringify({ rows, sales, recon, paidOuts, notes }));
       lastSaveRef.current = Date.now();
